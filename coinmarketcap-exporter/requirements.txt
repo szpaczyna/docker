@@ -1,0 +1,11 @@
+cachetools
+certifi
+chardet
+greenlet
+idna
+msgpack
+neovim
+prometheus-client
+requests
+urllib3
+
