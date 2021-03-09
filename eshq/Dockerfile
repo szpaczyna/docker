@@ -7,7 +7,7 @@ FROM arm64v8/ubuntu:groovy
 RUN apt update && \
     apt upgrade -y
 RUN apt install -y apt-utils && \
-    apt install -y supervisor python3-dev build-essential python3-pip
+    apt install -y supervisor python3-dev build-essential python3-pip wget
 
 
 # Copy project sources
@@ -16,17 +16,17 @@ COPY . /src
 # Set working directory
 WORKDIR /src
 
-#RUN pip3 download --dest "/tmp/packages" -r requirements.txt && \
-#    wget -qO pynacl.tar.gz https://github.com/pyca/pynacl/archive/1.4.0.tar.gz && \
-#    mkdir pynacl && tar --strip-components=1 -xvf pynacl.tar.gz -C pynacl && rm pynacl.tar.gz
-#RUN cd pynacl && \
-#    patch < ../PyNaCl-remove-check.patch && \
-#    python3 setup.py sdist && \
-#    cp -f dist/PyNaCl-1.4.0.tar.gz /tmp/packages/
+RUN pip3 download --dest "/tmp/packages" -r requirements.txt && \
+    wget -qO pynacl.tar.gz https://github.com/pyca/pynacl/archive/1.4.0.tar.gz && \
+    mkdir pynacl && tar --strip-components=1 -xvf pynacl.tar.gz -C pynacl && rm pynacl.tar.gz
+RUN cd pynacl && \
+    patch < ../PyNaCl-remove-check.patch && \
+    python3 setup.py sdist && \
+    cp -f dist/PyNaCl-1.4.0.tar.gz /tmp/packages/
 
 RUN pip3 install --upgrade pip && \
-    pip3 install -r requirements.txt
-    #rm -rf /tmp/packages
+    pip3 install -r requirements.txt && \
+    rm -rf /tmp/packages
 
 # Install app dependencies and create supervisord dirs
 RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor /var/run/supervisor
@@ -41,6 +41,9 @@ RUN cp /src/deployment/logging.conf /src/logging.conf && \
 RUN chgrp -R 0 /src /var/log/supervisor /var/run/supervisor && \
     chmod -R g=u  /src /var/log/supervisor /var/run/supervisor
 
+## Remove repos and unneeded packages
+RUN apt -y remove --autoremove build-essential && \
+    rm -rf /var/lib/apt/lists/*
 # Expose service port
 EXPOSE 5000
 
