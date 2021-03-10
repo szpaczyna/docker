@@ -1,14 +1,9 @@
-FROM arm64v8/ubuntu:groovy
-
-#RUN ln -s /usr/bin/dpkg-split /usr/sbin/dpkg-split
-#RUN ln -s /usr/bin/dpkg-deb /usr/sbin/dpkg-deb
-#RUN ln -s /bin/tar /usr/sbin/tar
+FROM python:3.8-slim
 
 RUN apt update && \
     apt upgrade -y
 RUN apt install -y apt-utils && \
     apt install -y supervisor python3-dev build-essential python3-pip wget
-
 
 # Copy project sources
 COPY . /src
