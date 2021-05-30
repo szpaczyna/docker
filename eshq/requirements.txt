@@ -35,7 +35,7 @@ pytest-html==1.22.0
 
 # Scheduler
 apscheduler==3.5.0
-Flask-APScheduler== 1.7.1
+Flask-APScheduler== 1.12.2
 
 # Socket
 python-engineio==3.0.0
