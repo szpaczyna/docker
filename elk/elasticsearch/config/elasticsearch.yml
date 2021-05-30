@@ -1,3 +1,21 @@
+---
 cluster.name: "morphine-cluster"
+node.name: "elasticsearch"
+node.master: true
+node.data: true
 network.host: 0.0.0.0
 discovery.type: single-node
+index.number_of_replicas: 0
+index.number_of_shards: 2
+
+action.disable_close_all_indices: true
+action.disable_delete_all_indices: true
+action.disable_shutdown: true
+
+monitor.jvm.gc.ParNew.warn: 1000ms
+monitor.jvm.gc.ParNew.info: 700ms
+monitor.jvm.gc.ParNew.debug: 400ms
+
+monitor.jvm.gc.ConcurrentMarkSweep.warn: 10s
+monitor.jvm.gc.ConcurrentMarkSweep.info: 5s
+monitor.jvm.gc.ConcurrentMarkSweep.debug: 2s

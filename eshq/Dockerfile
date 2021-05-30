@@ -1,4 +1,7 @@
 FROM python:3.8-slim
+#RUN ln -s /usr/bin/dpkg-split /usr/sbin/dpkg-split
+#RUN ln -s /usr/bin/dpkg-deb /usr/sbin/dpkg-deb
+#RUN ln -s /bin/tar /usr/sbin/tar
 
 RUN apt update && \
     apt upgrade -y
@@ -37,7 +40,7 @@ RUN chgrp -R 0 /src /var/log/supervisor /var/run/supervisor && \
     chmod -R g=u  /src /var/log/supervisor /var/run/supervisor
 
 ## Remove repos and unneeded packages
-RUN apt -y remove --autoremove build-essential && \
+RUN apt -y remove --autoremove build-essential python3-dev && \
     rm -rf /var/lib/apt/lists/*
 # Expose service port
 EXPOSE 5000

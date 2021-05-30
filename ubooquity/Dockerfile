@@ -1,42 +1,32 @@
-FROM ghcr.io/linuxserver/baseimage-alpine:arm64v8-3.12
+FROM ghcr.io/linuxserver/baseimage-alpine:arm64v8-3.13
 
-# set version label
-ARG BUILD_DATE
-ENV VERSION=0.0.2
 ENV UBOOQUITY_VERSION=2.1.2
 
 RUN \
- echo "**** install build packages ****" && \
- apk add --no-cache --virtual=build-dependencies \
-	curl \
-	unzip && \
- echo "**** install runtime packages ****" && \
- apk add --no-cache \
-	openjdk8-jre-base
+  apk --no-cache --update add tzdata curl unzip bash shadow openjdk8-jre-base
+
+WORKDIR /app/ubooquity
 
 RUN \
- echo "**** install ubooquity ****" && \
- if [ -z ${UBOOQUITY_VERSION+x} ]; then \
-	UBOOQUITY_VERSION=$(curl -IsL -w %{url_effective} -o /dev/null http://vaemendis.net/ubooquity/service/download.php \
-	| sed 's|.*Ubooquity-\([0-9\.]*\).zip|\1|'); \
- fi && \
- mkdir -p \
-	/app/ubooquity && \
- curl -o \
- /tmp/ubooquity.zip -L \
-	"http://vaemendis.net/ubooquity/downloads/Ubooquity-${UBOOQUITY_VERSION}.zip"
-RUN \
- unzip /tmp/ubooquity.zip -d /app/ubooquity && \
- echo "**** cleanup ****" && \
- apk del --purge \
-	build-dependencies && \
- rm -rf \
-	/tmp/*
+  mkdir -p /app/ubooquity && \
+  curl --retry 8 -s -L -O http://vaemendis.net/ubooquity/downloads/Ubooquity-${UBOOQUITY_VERSION}.zip && \
+  unzip Ubooquity-${UBOOQUITY_VERSION}.zip -d /app/ubooquity
 
-# copy local files
+RUN \
+  mkdir -p /config && \
+  mkdir -p /comics && \
+  mkdir -p /files
+
+RUN  mkdir -p /config/themes
+COPY keystore.jks /config/
 COPY root/ /
-COPY themes/ /config/
+COPY themes/plextheme-reading /config/themes/
 
-# ports and volumes
+RUN \
+  chown 1000:911 -R /config && \
+  chown 1000:911 -R /comics && \
+  chown 1000:911 -R /files && \
+  chown 1000:911 /app/ubooquity -R
+
 EXPOSE 2202 2203
 VOLUME /books /comics /config /files

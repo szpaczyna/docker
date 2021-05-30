@@ -1,7 +1,7 @@
 FROM node:12.16.2-alpine
 
 # Set environment variables
-ENV XBROWSERSYNC_API_VERSION 1.1.12
+ENV XBROWSERSYNC_API_VERSION 1.1.13
 
 WORKDIR /usr/src/api
 
@@ -14,6 +14,7 @@ RUN wget -q -O release.tar.gz https://github.com/xBrowserSync/api/archive/v$XBRO
 
 # Install dependencies
 RUN npm install --only=production
+COPY settings.json config/
 
 # Expose port and start api
 EXPOSE 8080

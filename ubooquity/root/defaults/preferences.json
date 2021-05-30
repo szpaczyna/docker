@@ -9,11 +9,14 @@
   } ],
   "booksPaths" : [ {
     "pathString" : "/books",
-    "userName" : [ "ami" ]
+    "userName" : [ "ami", "agaton" ]
   } ],
   "users" : [ {
     "name" : "ami",
     "passwordHash" : "d8f187c3523977492658eea568f171dbd78557993a40e3d22214d8351f7718d5"
+  }, {
+    "name" : "agaton",
+    "passwordHash" : "74d33190a0e062377e1ba367f6c917de157afc83269d0672c37b206d86d942fd"
   } ],
   "isFilesProviderEnabled" : true,
   "isComicsProviderEnabled" : true,
@@ -26,7 +29,7 @@
   "comicsPaginationNumber" : 100,
   "bookWidth" : 160,
   "bookHeight" : 230,
-  "booksPaginationNumber" : 100,
+  "booksPaginationNumber" : 128,
   "minimizeToTray" : false,
   "minimizeOnStartup" : false,
   "autoscanPeriod" : 720,
@@ -40,13 +43,14 @@
   "reverseProxyPrefix" : "",
   "keystorePath" : "/config/keystore",
   "keystorePassword" : "Dupa.0987",
-  "isOpdsProviderEnabled" : true,
+  "isOpdsProviderEnabled" : false,
   "folderExclusionPattern" : "",
   "bypassSingleRootFolder" : false,
   "enableFolderMetadataDisplay" : false,
-  "bookmarkUsingCookies" : false,
-  "displayTitleInsteadOfFileName" : false,
+  "bookmarkUsingCookies" : true,
+  "displayTitleInsteadOfFileName" : true,
   "keepUnreachableSharedFolders" : false,
   "isCalibreLibrary" : false,
   "instanceId" : "87473792de9f47198876cb431e02fb20"
 }
+

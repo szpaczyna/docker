@@ -27,8 +27,9 @@ then
 
   # Defaults
   DOCKERFILE="${DOCKERFILE:-Dockerfile}"
-  IMAGE_NAME="${IMAGE_NAME:-billimek/prometheus-speedtest-exporter}"
-  TAG="${TAG:-latest}"
+  IMAGE_NAME="${IMAGE_NAME:-szpaczyn/prometheus-speedtest-exporter}"
+  #TAG="${TAG:-latest}"
+  TAG="${TAG:-1.1.0}"
 
   case "$1" in
     latest)
@@ -59,9 +60,6 @@ then
   # shellcheck disable=2207
   # platforms=($(get_available_architectures "$base_image" "$base_tag"))
   platforms=(
-    linux/amd64
-    linux/arm/v6
-    linux/arm/v7
     linux/arm64/v8
   )
 

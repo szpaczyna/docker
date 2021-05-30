@@ -1,0 +1,41 @@
+html, body{
+  height:100%;
+}
+
+.footer-pad {
+  padding-top: 100px;
+}
+
+.col-left-border {
+  min-height: 400px;
+  height:100%;
+  border-left: 1px solid #aaa;
+}
+
+.trash {
+  padding-bottom: 10px;
+}
+
+.trash a {
+  text-decoration: none;
+  color: red;
+}
+
+.trash a:hover span {
+  color: red;
+}
+
+.trash a span {
+  color: transparent;
+}
+
+
+/* Cut long strings */
+.list-group-item {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Remove focus outline on buttons */
+.list-group-item:focus {outline:none;}

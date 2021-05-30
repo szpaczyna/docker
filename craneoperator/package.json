@@ -1,0 +1,51 @@
+{
+  "name": "craneoperator",
+  "version": "2.0.0",
+  "description": "The Docker Registry Viewer",
+  "main": "bundle.js",
+  "dependencies": {
+    "axios": "^0.8.0",
+    "babel-core": "^6.3.13",
+    "babel-loader": "^6.2.0",
+    "babel-preset-es2015": "^6.3.13",
+    "babel-preset-react": "^6.3.13",
+    "esprima-fb": "15001.1001.0-dev-harmony-fb",
+    "history": "^1.13.1",
+    "moment": "^2.18.1",
+    "prop-types": "^15.5.8",
+    "query-string": "^5.0.0",
+    "re-base": "^1.5.1",
+    "react": "^15.6.1",
+    "react-bootstrap": "^0.31.2",
+    "react-dom": "^15.6.1",
+    "react-intl": "^2.1.2",
+    "react-loader": "^2.4.0",
+    "react-router": "^1.0.3",
+    "react-router-dom": "^4.1.2",
+    "react-time": "^4.3.0",
+    "throttle-debounce": "^1.0.1",
+    "webpack": "^1.13.0"
+  },
+  "devDependencies": {
+    "webpack-dev-server": "^1.14.1"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "webpack-dev-server --content-base public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/parabuzzle/craneop.git"
+  },
+  "keywords": [
+    "docker",
+    "registry",
+    "browser"
+  ],
+  "author": "Michael Heijmans",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/parabuzzle/craneop/issues"
+  },
+  "homepage": "https://github.com/parabuzzle/craneop#readme"
+}

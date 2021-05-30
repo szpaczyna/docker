@@ -1,0 +1,2 @@
+- pipeline.id: pihole
+  path.config: "/etc/logstash/conf.d/10-pihole.conf"
