@@ -19,7 +19,7 @@ requests>=2.0.0, <3.0.0
 dogpile.cache == 0.6.5
 
 # Database
-SQLAlchemy==1.2.0
+SQLAlchemy==1.4.17
 Flask-SQLAlchemy==2.3.2
 Flask-Migrate
 
@@ -47,5 +47,5 @@ eventlet==0.25.0
 gunicorn==19.7.1
 
 # Elasticsearch
-six==1.11.0
+six==1.16.0
 python-dateutil==2.7.2
