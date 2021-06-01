@@ -47,5 +47,5 @@ eventlet==0.25.0
 gunicorn==19.7.1
 
 # Elasticsearch
-six==1.11.0
+six==1.16.0
 python-dateutil==2.7.2
