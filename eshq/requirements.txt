@@ -1,7 +1,7 @@
 jmespath==0.9.3
 
 # Flask
-Flask==0.12.4
+Flask==2.0.1
 Flask-restful==0.3.6
 Flask-Script==2.0.6
 
@@ -31,11 +31,11 @@ pytest==5.0.1
 pytest-cov==2.7.1
 pytest-ordering==0.6
 pytest-docker-compose==3.0.0
-pytest-html==1.22.0
+pytest-html==3.1.1
 
 # Scheduler
 apscheduler==3.5.0
-Flask-APScheduler== 1.7.1
+Flask-APScheduler== 1.12.2
 
 # Socket
 python-engineio==3.0.0
