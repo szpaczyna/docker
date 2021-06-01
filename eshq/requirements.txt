@@ -6,7 +6,7 @@ Flask-restful==0.3.6
 Flask-Script==2.0.6
 
 # JSON serializer
-flask-marshmallow==0.8.0
+flask-marshmallow==0.14.0
 marshmallow-sqlalchemy==0.13.2
 marshmallow==3.0.0b5
 
@@ -19,7 +19,7 @@ requests>=2.0.0, <3.0.0
 dogpile.cache == 0.6.5
 
 # Database
-SQLAlchemy==1.2.0
+SQLAlchemy==1.4.17
 Flask-SQLAlchemy==2.3.2
 Flask-Migrate
 
