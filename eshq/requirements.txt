@@ -20,7 +20,7 @@ dogpile.cache == 0.6.5
 
 # Database
 SQLAlchemy==1.4.17
-Flask-SQLAlchemy==2.3.2
+Flask-SQLAlchemy==2.5.1
 Flask-Migrate
 
 # Testing
