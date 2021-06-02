@@ -7,7 +7,7 @@ Flask-Script==2.0.6
 
 # JSON serializer
 flask-marshmallow==0.14.0
-marshmallow-sqlalchemy==0.13.2
+marshmallow-sqlalchemy==0.26.0
 marshmallow==3.0.0b5
 
 # requests
