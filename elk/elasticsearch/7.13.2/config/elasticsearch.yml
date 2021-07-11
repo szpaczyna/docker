@@ -1,0 +1,9 @@
+---
+cluster.name: "morphine-cluster"
+node.name: "elasticsearch"
+node.master: true
+node.data: true
+network.host: 0.0.0.0
+discovery.type: single-node
+  #index.number_of_replicas: 0
+  #index.number_of_shards: 2
