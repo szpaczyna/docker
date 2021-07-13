@@ -1,21 +1,32 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package collector
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path"
-	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func getRoles(node RoleDetailer) map[string]bool {
+func getRoles(node NodeStatsNodeResponse) map[string]bool {
 	// default settings (2.x) and map, which roles to consider
 	roles := map[string]bool{
 		"master": false,
@@ -24,9 +35,8 @@ func getRoles(node RoleDetailer) map[string]bool {
 		"client": true,
 	}
 	// assumption: a 5.x node has at least one role, otherwise it's a 1.7 or 2.x node
-	// XXX: false, can be a coordinator node, which has no roles.
-	if len(node.GetRoles()) > 0 {
-		for _, role := range node.GetRoles() {
+	if len(node.Roles) > 0 {
+		for _, role := range node.Roles {
 			// set every absent role to false
 			if _, ok := roles[role]; !ok {
 				roles[role] = false
@@ -36,7 +46,7 @@ func getRoles(node RoleDetailer) map[string]bool {
 			}
 		}
 	} else {
-		for role, setting := range node.GetAttributes() {
+		for role, setting := range node.Attributes {
 			if _, ok := roles[role]; ok {
 				if setting == "false" {
 					roles[role] = false
@@ -46,7 +56,7 @@ func getRoles(node RoleDetailer) map[string]bool {
 			}
 		}
 	}
-	if !node.IsClient() {
+	if len(node.HTTP) == 0 {
 		roles["client"] = false
 	}
 	return roles
@@ -155,13 +165,14 @@ type filesystemIODeviceMetric struct {
 
 // Nodes information struct
 type Nodes struct {
-	logger  log.Logger
-	updater *nodeStatsUpdater
+	logger log.Logger
+	client *http.Client
+	url    *url.URL
+	all    bool
+	node   string
 
-	up                prometheus.Gauge
-	totalScrapes      prometheus.Counter
-	totalScrapeTime   prometheus.Counter
-	jsonParseFailures prometheus.Counter
+	up                              prometheus.Gauge
+	totalScrapes, jsonParseFailures prometheus.Counter
 
 	nodeMetrics               []*nodeMetric
 	gcCollectionMetrics       []*gcCollectionMetric
@@ -172,18 +183,14 @@ type Nodes struct {
 }
 
 // NewNodes defines Nodes Prometheus metrics
-func NewNodes(ctx context.Context, logger log.Logger, client *http.Client, url *url.URL, all bool, node string, interval time.Duration) *Nodes {
-	var nodes = &Nodes{
+func NewNodes(logger log.Logger, client *http.Client, url *url.URL, all bool, node string) *Nodes {
+	return &Nodes{
 		logger: logger,
-		updater: &nodeStatsUpdater{
-			logger:   logger,
-			client:   client,
-			url:      url,
-			all:      all,
-			node:     node,
-			interval: interval,
-			sync:     make(chan struct{}, 1),
-		},
+		client: client,
+		url:    url,
+		all:    all,
+		node:   node,
+
 		up: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: prometheus.BuildFQName(namespace, "node_stats", "up"),
 			Help: "Was the last scrape of the ElasticSearch nodes endpoint successful.",
@@ -191,10 +198,6 @@ func NewNodes(ctx context.Context, logger log.Logger, client *http.Client, url *
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: prometheus.BuildFQName(namespace, "node_stats", "total_scrapes"),
 			Help: "Current total ElasticSearch node scrapes.",
-		}),
-		totalScrapeTime: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: prometheus.BuildFQName(namespace, "node_stats", "total_scrape_time_seconds"),
-			Help: "Current total time spent in ElasticSearch nodes scrapes.",
 		}),
 		jsonParseFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: prometheus.BuildFQName(namespace, "node_stats", "json_parse_failures"),
@@ -1785,8 +1788,6 @@ func NewNodes(ctx context.Context, logger log.Logger, client *http.Client, url *
 			},
 		},
 	}
-	nodes.updater.Run(ctx)
-	return nodes
 }
 
 // Describe add metrics descriptions
@@ -1807,37 +1808,74 @@ func (c *Nodes) Describe(ch chan<- *prometheus.Desc) {
 		ch <- metric.Desc
 	}
 	ch <- c.up.Desc()
-	ch <- c.totalScrapeTime.Desc()
 	ch <- c.totalScrapes.Desc()
 	ch <- c.jsonParseFailures.Desc()
 }
 
+func (c *Nodes) fetchAndDecodeNodeStats() (nodeStatsResponse, error) {
+	var nsr nodeStatsResponse
+
+	u := *c.url
+
+	if c.all {
+		u.Path = path.Join(u.Path, "/_nodes/stats")
+	} else {
+		u.Path = path.Join(u.Path, "_nodes", c.node, "stats")
+	}
+
+	res, err := c.client.Get(u.String())
+	if err != nil {
+		return nsr, fmt.Errorf("failed to get cluster health from %s://%s:%s%s: %s",
+			u.Scheme, u.Hostname(), u.Port(), u.Path, err)
+	}
+
+	defer func() {
+		err = res.Body.Close()
+		if err != nil {
+			_ = level.Warn(c.logger).Log(
+				"msg", "failed to close http.Client",
+				"err", err,
+			)
+		}
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		return nsr, fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
+	}
+
+	bts, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		c.jsonParseFailures.Inc()
+		return nsr, err
+	}
+
+	if err := json.Unmarshal(bts, &nsr); err != nil {
+		c.jsonParseFailures.Inc()
+		return nsr, err
+	}
+	return nsr, nil
+}
+
 // Collect gets nodes metric values
 func (c *Nodes) Collect(ch chan<- prometheus.Metric) {
-	var now = time.Now()
 	c.totalScrapes.Inc()
 	defer func() {
-		_ = level.Debug(c.logger).Log("msg", "scrape took", "seconds", time.Since(now).Seconds())
-		c.totalScrapeTime.Add(time.Since(now).Seconds())
 		ch <- c.up
 		ch <- c.totalScrapes
-		ch <- c.totalScrapeTime
 		ch <- c.jsonParseFailures
 	}()
 
-	if c.updater.lastError != nil {
+	nodeStatsResp, err := c.fetchAndDecodeNodeStats()
+	if err != nil {
 		c.up.Set(0)
-		if _, ok := c.updater.lastError.(*json.MarshalerError); ok {
-			c.jsonParseFailures.Inc()
-		}
 		_ = level.Warn(c.logger).Log(
 			"msg", "failed to fetch and decode node stats",
-			"err", c.updater.lastError,
+			"err", err,
 		)
+		return
 	}
 	c.up.Set(1)
 
-	var nodeStatsResp = c.updater.lastResponse
 	for _, node := range nodeStatsResp.Nodes {
 		// Handle the node labels metric
 		roles := getRoles(node)
@@ -1924,99 +1962,4 @@ func (c *Nodes) Collect(ch chan<- prometheus.Metric) {
 		}
 
 	}
-}
-
-type nodeStatsUpdater struct {
-	logger       log.Logger
-	client       *http.Client
-	url          *url.URL
-	all          bool
-	node         string
-	sync         chan struct{}
-	interval     time.Duration
-	lastResponse nodeStatsResponse
-	lastError    error
-}
-
-func (upt *nodeStatsUpdater) Run(ctx context.Context) {
-	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				_ = level.Info(upt.logger).Log(
-					"msg", "context cancelled, exiting node stats update loop",
-					"err", ctx.Err(),
-				)
-				return
-			case <-upt.sync:
-				upt.lastResponse, upt.lastError = upt.fetchAndDecodeNodeStats()
-				continue
-			}
-		}
-	}(ctx)
-
-	_ = level.Info(upt.logger).Log("msg", "triggering initial node stats call")
-	upt.sync <- struct{}{}
-
-	go func(ctx context.Context) {
-		ticker := time.NewTicker(upt.interval)
-		for {
-			select {
-			case <-ctx.Done():
-				_ = level.Info(upt.logger).Log(
-					"msg", "context cancelled, exiting node stats trigger loop",
-					"err", ctx.Err(),
-				)
-				return
-			case <-ticker.C:
-				_ = level.Debug(upt.logger).Log(
-					"msg", "triggering periodic node stats update",
-				)
-				upt.sync <- struct{}{}
-			}
-		}
-	}(ctx)
-}
-
-func (upt *nodeStatsUpdater) fetchAndDecodeNodeStats() (nodeStatsResponse, error) {
-	_ = level.Debug(upt.logger).Log("msg", "getting fresh node stats metrics")
-	var nsr nodeStatsResponse
-
-	u := *upt.url
-
-	if upt.all {
-		u.Path = path.Join(u.Path, "/_nodes/stats")
-	} else {
-		u.Path = path.Join(u.Path, "_nodes", upt.node, "stats")
-	}
-
-	res, err := upt.client.Get(u.String())
-	if err != nil {
-		return nsr, fmt.Errorf("failed to get cluster health from %s://%s:%s%s: %s",
-			u.Scheme, u.Hostname(), u.Port(), u.Path, err)
-	}
-
-	defer func() {
-		err = res.Body.Close()
-		if err != nil {
-			_ = level.Warn(upt.logger).Log(
-				"msg", "failed to close http.Client",
-				"err", err,
-			)
-		}
-	}()
-
-	if res.StatusCode != http.StatusOK {
-		return nsr, fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
-	}
-
-	bts, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return nsr, err
-	}
-
-	if err := json.Unmarshal(bts, &nsr); err != nil {
-		return nsr, err
-	}
-	return nsr, nil
 }

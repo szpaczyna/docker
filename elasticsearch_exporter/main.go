@@ -1,16 +1,30 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"time"
 
+	"context"
+
 	"github.com/go-kit/kit/log/level"
-	"github.com/justwatchcom/elasticsearch_exporter/collector"
-	"github.com/justwatchcom/elasticsearch_exporter/pkg/clusterinfo"
+	"github.com/prometheus-community/elasticsearch_exporter/collector"
+	"github.com/prometheus-community/elasticsearch_exporter/pkg/clusterinfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
@@ -38,21 +52,15 @@ func main() {
 		esNode = kingpin.Flag("es.node",
 			"Node's name of which metrics should be exposed.").
 			Default("_local").Envar("ES_NODE").String()
-		esNodesInterval = kingpin.Flag("es.nodes.interval",
-			"Node stats metrics update interval").
-			Default("30s").Envar("ES_NODES_INTERVAL").Duration()
-		esExportNodesHTTP = kingpin.Flag("es.nodehttp",
-			"Export stats for node HTTP in the cluster.").
-			Default("false").Envar("ES_NODE_HTTP").Bool()
 		esExportIndices = kingpin.Flag("es.indices",
 			"Export stats for indices in the cluster.").
 			Default("false").Envar("ES_INDICES").Bool()
-		esIndicesInterval = kingpin.Flag("es.indices.interval",
-			"Node stats metrics update interval").
-			Default("30s").Envar("ES_INDICES_INTERVAL").Duration()
 		esExportIndicesSettings = kingpin.Flag("es.indices_settings",
 			"Export stats for settings of all indices of the cluster.").
 			Default("false").Envar("ES_INDICES_SETTINGS").Bool()
+		esExportIndicesMappings = kingpin.Flag("es.indices_mappings",
+			"Export stats for mappings of all indices of the cluster.").
+			Default("false").Envar("ES_INDICES_MAPPINGS").Bool()
 		esExportClusterSettings = kingpin.Flag("es.cluster_settings",
 			"Export stats for cluster settings.").
 			Default("false").Envar("ES_CLUSTER_SETTINGS").Bool()
@@ -62,9 +70,6 @@ func main() {
 		esExportSnapshots = kingpin.Flag("es.snapshots",
 			"Export stats for the cluster snapshots.").
 			Default("false").Envar("ES_SNAPSHOTS").Bool()
-		esSnapshotsInterval = kingpin.Flag("es.snapshots.interval",
-			"Snapshots metrics update interval").
-			Default("0s").Envar("ES_SNAPSHOTS_INTERVAL").Duration()
 		esClusterInfoInterval = kingpin.Flag("es.clusterinfo.interval",
 			"Cluster info update interval for the cluster label").
 			Default("5m").Envar("ES_CLUSTERINFO_INTERVAL").Duration()
@@ -97,9 +102,6 @@ func main() {
 
 	logger := getLogger(*logLevel, *logOutput, *logFormat)
 
-	// create a context that is cancelled on SIGKILL
-	ctx, cancel := context.WithCancel(context.Background())
-
 	esURL, err := url.Parse(*esURI)
 	if err != nil {
 		_ = level.Error(logger).Log(
@@ -111,13 +113,13 @@ func main() {
 
 	// returns nil if not provided and falls back to simple TCP.
 	tlsConfig := createTLSConfig(*esCA, *esClientCert, *esClientPrivateKey, *esInsecureSkipVerify)
-	httpTransport := &http.Transport{
-		TLSClientConfig: tlsConfig,
-		Proxy:           http.ProxyFromEnvironment,
-	}
+
 	httpClient := &http.Client{
-		Timeout:   *esTimeout,
-		Transport: httpTransport,
+		Timeout: *esTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+			Proxy:           http.ProxyFromEnvironment,
+		},
 	}
 
 	// version metric
@@ -128,15 +130,10 @@ func main() {
 	clusterInfoRetriever := clusterinfo.New(logger, httpClient, esURL, *esClusterInfoInterval)
 
 	prometheus.MustRegister(collector.NewClusterHealth(logger, httpClient, esURL))
-	prometheus.MustRegister(collector.NewNodes(ctx, logger, createClient(httpTransport, *esTimeout, *esNodesInterval*2), esURL, *esAllNodes, *esNode, *esNodesInterval))
-
-	if *esExportNodesHTTP {
-		prometheus.MustRegister(collector.NewNodesHTTP(logger, httpClient, esURL))
-	}
+	prometheus.MustRegister(collector.NewNodes(logger, httpClient, esURL, *esAllNodes, *esNode))
 
 	if *esExportIndices || *esExportShards {
-		client := createClient(httpTransport, *esTimeout, *esIndicesInterval*2)
-		iC := collector.NewIndices(ctx, logger, client, esURL, *esExportShards, *esIndicesInterval)
+		iC := collector.NewIndices(logger, httpClient, esURL, *esExportShards)
 		prometheus.MustRegister(iC)
 		if registerErr := clusterInfoRetriever.RegisterConsumer(iC); registerErr != nil {
 			_ = level.Error(logger).Log("msg", "failed to register indices collector in cluster info")
@@ -145,8 +142,7 @@ func main() {
 	}
 
 	if *esExportSnapshots {
-		client := createClient(httpTransport, *esTimeout, *esSnapshotsInterval)
-		prometheus.MustRegister(collector.NewSnapshots(ctx, logger, client, esURL, *esSnapshotsInterval))
+		prometheus.MustRegister(collector.NewSnapshots(logger, httpClient, esURL))
 	}
 
 	if *esExportClusterSettings {
@@ -157,8 +153,15 @@ func main() {
 		prometheus.MustRegister(collector.NewIndicesSettings(logger, httpClient, esURL))
 	}
 
+	if *esExportIndicesMappings {
+		prometheus.MustRegister(collector.NewIndicesMappings(logger, httpClient, esURL))
+	}
+
 	// create a http server
 	server := &http.Server{}
+
+	// create a context that is cancelled on SIGKILL
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// start the cluster info retriever
 	switch runErr := clusterInfoRetriever.Run(ctx); runErr {
@@ -228,15 +231,4 @@ func main() {
 	_ = level.Info(logger).Log("msg", "shutting down")
 	_ = server.Shutdown(srvCtx)
 	cancel()
-}
-
-func createClient(transport *http.Transport, globalTimeout, timeout time.Duration) *http.Client {
-	var c = &http.Client{
-		Timeout:   globalTimeout,
-		Transport: transport,
-	}
-	if timeout != 0 {
-		c.Timeout = timeout
-	}
-	return c
 }

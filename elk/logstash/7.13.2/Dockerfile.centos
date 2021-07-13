@@ -1,0 +1,57 @@
+FROM centos:centos8
+
+## Update latest packges
+RUN for iter in {1..10}; do dnf update --setopt=tsflags=nodocs -y && \
+    dnf install --setopt=tsflags=nodocs -y tar nc zip unzip && \
+    dnf clean all && exit_code=0 && break || exit_code=\$? && echo "dnf error: retry \$iter in 10s" && sleep 10; done; \
+    (exit 0)
+
+## Setting the environment
+WORKDIR /usr/share/logstash
+ENV PATH /usr/share/logstash:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\$PATH
+RUN groupadd -g 1000 logstash && \
+    adduser -u 1000 -g 1000 -d /usr/share/logstash logstash
+
+## Downloading and Installing Logstash (TAR)
+RUN cd /opt && \
+    curl --retry 8 -s -L -O https://artifacts.elastic.co/downloads/logstash/logstash-7.12.0-linux-aarch64.tar.gz && \
+    cd -
+RUN tar zxf /opt/logstash-7.12.0-linux-aarch64.tar.gz --strip-components=1
+
+## Configuring Logstash
+RUN mkdir -p config && \
+    mkdir -p data
+RUN mkdir -p /etc/logstash/conf.d && \
+    mkdir -p /etc/logstash/patterns && \
+    mkdir -p /etc/logstash/logs
+RUN chmod 0775 config data && \
+    chmod 0775 /etc/logstash -R
+
+COPY ../config/log4j2.properties ../config/jvm.options config/logstash.yml /etc/logstash/ 
+RUN chmod 0660 config/log4j2.properties \
+    config/jvm.options
+
+RUN chmod 0775 /usr/share/logstash && \
+    chgrp 0 /usr/share/logstash && \
+    chown logstash /usr/share/logstash -R
+
+COPY --chown=1000:0 bin/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENV ELASTIC_CONTAINER true
+RUN chgrp 0 /usr/local/bin/docker-entrypoint.sh && \
+    chmod g=u /etc/passwd && \
+    chmod 0775 /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 5044/tcp
+EXPOSE 5045/tcp
+EXPOSE 9600/tcp
+
+LABEL maintainer="shpaq@shpaq.org" \ 
+  org.opencontainers.image.created="2021-04-05" \
+  org.opencontainers.image.documentation="https://www.elastic.co/guide/en/logstash/reference/index.html" \
+  org.opencontainers.image.licenses="Apache-2.0-License" \
+  org.opencontainers.image.source="https://github.com/elastic/logstash" \
+  org.opencontainers.image.title="Logstash" \
+  org.opencontainers.image.url="https://www.elastic.co/products/logstash" \
+  org.opencontainers.image.vendor="Elastic" \
+  org.opencontainers.image.version="7.12.0"
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

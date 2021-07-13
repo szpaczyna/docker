@@ -1,14 +1,25 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package collector
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path"
-	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -42,30 +53,23 @@ var (
 
 // Snapshots information struct
 type Snapshots struct {
-	logger  log.Logger
-	updater *snapshotsUpdater
+	logger log.Logger
+	client *http.Client
+	url    *url.URL
 
-	up                prometheus.Gauge
-	totalScrapes      prometheus.Counter
-	totalScrapeTime   prometheus.Counter
-	jsonParseFailures prometheus.Counter
+	up                              prometheus.Gauge
+	totalScrapes, jsonParseFailures prometheus.Counter
 
 	snapshotMetrics   []*snapshotMetric
 	repositoryMetrics []*repositoryMetric
 }
 
 // NewSnapshots defines Snapshots Prometheus metrics
-func NewSnapshots(ctx context.Context, logger log.Logger, client *http.Client, url *url.URL, interval time.Duration) *Snapshots {
-	snapshots := &Snapshots{
+func NewSnapshots(logger log.Logger, client *http.Client, url *url.URL) *Snapshots {
+	return &Snapshots{
 		logger: logger,
-
-		updater: &snapshotsUpdater{
-			logger:   logger,
-			client:   client,
-			url:      url,
-			interval: interval,
-			sync:     make(chan struct{}, 1),
-		},
+		client: client,
+		url:    url,
 
 		up: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: prometheus.BuildFQName(namespace, "snapshot_stats", "up"),
@@ -74,10 +78,6 @@ func NewSnapshots(ctx context.Context, logger log.Logger, client *http.Client, u
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: prometheus.BuildFQName(namespace, "snapshot_stats", "total_scrapes"),
 			Help: "Current total ElasticSearch snapshots scrapes.",
-		}),
-		totalScrapeTime: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: prometheus.BuildFQName(namespace, "snapshot_stats", "total_scrape_time_seconds"),
-			Help: "Current total time spent in ElasticSearch snapshots scrapes.",
 		}),
 		jsonParseFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: prometheus.BuildFQName(namespace, "snapshot_stats", "json_parse_failures"),
@@ -217,8 +217,6 @@ func NewSnapshots(ctx context.Context, logger log.Logger, client *http.Client, u
 			},
 		},
 	}
-	snapshots.updater.Run(ctx)
-	return snapshots
 }
 
 // Describe add Snapshots metrics descriptions
@@ -227,38 +225,91 @@ func (s *Snapshots) Describe(ch chan<- *prometheus.Desc) {
 		ch <- metric.Desc
 	}
 	ch <- s.up.Desc()
-	ch <- s.totalScrapeTime.Desc()
 	ch <- s.totalScrapes.Desc()
 	ch <- s.jsonParseFailures.Desc()
 }
 
+func (s *Snapshots) getAndParseURL(u *url.URL, data interface{}) error {
+	res, err := s.client.Get(u.String())
+	if err != nil {
+		return fmt.Errorf("failed to get from %s://%s:%s%s: %s",
+			u.Scheme, u.Hostname(), u.Port(), u.Path, err)
+	}
+
+	defer func() {
+		err = res.Body.Close()
+		if err != nil {
+			_ = level.Warn(s.logger).Log(
+				"msg", "failed to close http.Client",
+				"err", err,
+			)
+		}
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
+	}
+
+	bts, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		s.jsonParseFailures.Inc()
+		return err
+	}
+
+	if err := json.Unmarshal(bts, data); err != nil {
+		s.jsonParseFailures.Inc()
+		return err
+	}
+	return nil
+}
+
+func (s *Snapshots) fetchAndDecodeSnapshotsStats() (map[string]SnapshotStatsResponse, error) {
+	mssr := make(map[string]SnapshotStatsResponse)
+
+	u := *s.url
+	u.Path = path.Join(u.Path, "/_snapshot")
+	var srr SnapshotRepositoriesResponse
+	err := s.getAndParseURL(&u, &srr)
+	if err != nil {
+		return nil, err
+	}
+	for repository := range srr {
+		u := *s.url
+		u.Path = path.Join(u.Path, "/_snapshot", repository, "/_all")
+		var ssr SnapshotStatsResponse
+		err := s.getAndParseURL(&u, &ssr)
+		if err != nil {
+			continue
+		}
+		mssr[repository] = ssr
+	}
+
+	return mssr, nil
+}
+
 // Collect gets Snapshots metric values
 func (s *Snapshots) Collect(ch chan<- prometheus.Metric) {
-	var now = time.Now()
 	s.totalScrapes.Inc()
 	defer func() {
-		_ = level.Debug(s.logger).Log("msg", "scrape took", "seconds", time.Since(now).Seconds())
-		s.totalScrapeTime.Add(time.Since(now).Seconds())
 		ch <- s.up
 		ch <- s.totalScrapes
-		ch <- s.totalScrapeTime
 		ch <- s.jsonParseFailures
 	}()
 
-	if s.updater.lastError != nil {
+	// indices
+	snapshotsStatsResp, err := s.fetchAndDecodeSnapshotsStats()
+	if err != nil {
 		s.up.Set(0)
-		if _, ok := s.updater.lastError.(*json.MarshalerError); ok {
-			s.jsonParseFailures.Inc()
-		}
 		_ = level.Warn(s.logger).Log(
 			"msg", "failed to fetch and decode snapshot stats",
-			"err", s.updater.lastError,
+			"err", err,
 		)
+		return
 	}
 	s.up.Set(1)
 
 	// Snapshots stats
-	for repositoryName, snapshotStats := range s.updater.lastResponse {
+	for repositoryName, snapshotStats := range snapshotsStatsResp {
 		for _, metric := range s.repositoryMetrics {
 			ch <- prometheus.MustNewConstMetric(
 				metric.Desc,
@@ -281,111 +332,4 @@ func (s *Snapshots) Collect(ch chan<- prometheus.Metric) {
 			)
 		}
 	}
-}
-
-type snapshotsUpdater struct {
-	logger       log.Logger
-	client       *http.Client
-	url          *url.URL
-	sync         chan struct{}
-	interval     time.Duration
-	lastResponse map[string]SnapshotStatsResponse
-	lastError    error
-}
-
-func (upt *snapshotsUpdater) Run(ctx context.Context) {
-	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				_ = level.Info(upt.logger).Log(
-					"msg", "context cancelled, exiting snapshots update loop",
-					"err", ctx.Err(),
-				)
-				return
-			case <-upt.sync:
-				upt.lastResponse, upt.lastError = upt.fetchAndDecodeSnapshotsStats()
-				continue
-			}
-		}
-	}(ctx)
-
-	_ = level.Info(upt.logger).Log("msg", "triggering initial snapshots call")
-	upt.sync <- struct{}{}
-
-	go func(ctx context.Context) {
-		ticker := time.NewTicker(upt.interval)
-		for {
-			select {
-			case <-ctx.Done():
-				_ = level.Info(upt.logger).Log(
-					"msg", "context cancelled, exiting snapshots trigger loop",
-					"err", ctx.Err(),
-				)
-				return
-			case <-ticker.C:
-				_ = level.Debug(upt.logger).Log(
-					"msg", "triggering periodic snapshots update",
-				)
-				upt.sync <- struct{}{}
-			}
-		}
-	}(ctx)
-}
-
-func (upt *snapshotsUpdater) getAndParseURL(u *url.URL, data interface{}) error {
-	res, err := upt.client.Get(u.String())
-	if err != nil {
-		return fmt.Errorf("failed to get from %s://%s:%s%s: %s",
-			u.Scheme, u.Hostname(), u.Port(), u.Path, err)
-	}
-
-	defer func() {
-		err = res.Body.Close()
-		if err != nil {
-			_ = level.Warn(upt.logger).Log(
-				"msg", "failed to close http.Client",
-				"err", err,
-			)
-		}
-	}()
-
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
-	}
-
-	bts, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(bts, data); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (upt *snapshotsUpdater) fetchAndDecodeSnapshotsStats() (map[string]SnapshotStatsResponse, error) {
-	_ = level.Debug(upt.logger).Log("msg", "getting fresh snapshots metrics")
-	mssr := make(map[string]SnapshotStatsResponse)
-
-	u := *upt.url
-	u.Path = path.Join(u.Path, "/_snapshot")
-	var srr SnapshotRepositoriesResponse
-	err := upt.getAndParseURL(&u, &srr)
-	if err != nil {
-		return nil, err
-	}
-	for repository := range srr {
-		u := *upt.url
-		u.Path = path.Join(u.Path, "/_snapshot", repository, "/_all")
-		var ssr SnapshotStatsResponse
-		err := upt.getAndParseURL(&u, &ssr)
-		if err != nil {
-			continue
-		}
-		mssr[repository] = ssr
-	}
-
-	return mssr, nil
 }

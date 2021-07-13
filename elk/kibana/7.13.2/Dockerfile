@@ -1,56 +1,55 @@
-FROM alpine:latest
+FROM node:10.23.1-alpine
 
-## Setting the environment
-ENV APP=kibana
-ENV UID=1000
-ENV GID=1000
-ENV ELASTIC_CONTAINER true
-ENV PATH /usr/share/kibana:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\$PATH
-ENV VERSION=7.13.2-linux-aarch64
+LABEL maintainer "https://github.com/blacktop"
+
+ENV VERSION 7.10.2
+ENV DOWNLOAD_URL https://artifacts.elastic.co/downloads/kibana
+ENV TARBAL "${DOWNLOAD_URL}/kibana-oss-${VERSION}-linux-x86_64.tar.gz"
+ENV TARBALL_ASC "${DOWNLOAD_URL}/kibana-oss-${VERSION}-linux-x86_64.tar.gz.asc"
+ENV TARBALL_SHA "77ebb247d5326f3f9ab97d57ecc00c7f70deae0e1857d8b5d8f9a5d05d6713e27514cca342df666be79ab85a580e9dc5c7fa9676d67e95db64a0d69546d8d699"
+ENV GPG_KEY "46095ACC8548582C1A2699A9D27D666CD88E42B4"
+
+ENV PATH /usr/share/kibana/bin:$PATH
+
+RUN apk add --no-cache bash su-exec
+RUN apk add --no-cache -t .build-deps wget ca-certificates gnupg openssl \
+  && set -ex \
+  && cd /tmp \
+  && echo "===> Install Kibana..." \
+  && wget --progress=bar:force -O kibana.tar.gz "$TARBAL"; \
+  if [ "$TARBALL_SHA" ]; then \
+  echo "$TARBALL_SHA *kibana.tar.gz" | sha512sum -c -; \
+  fi; \
+  if [ "$TARBALL_ASC" ]; then \
+  wget --progress=bar:force -O kibana.tar.gz.asc "$TARBALL_ASC"; \
+  export GNUPGHOME="$(mktemp -d)"; \
+  ( gpg --keyserver ha.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
+  || gpg --keyserver pgp.mit.edu --recv-keys "$GPG_KEY" \
+  || gpg --keyserver keyserver.pgp.com --recv-keys "$GPG_KEY" ); \
+  gpg --batch --verify kibana.tar.gz.asc kibana.tar.gz; \
+  rm -rf "$GNUPGHOME" kibana.tar.gz.asc || true; \
+  fi; \
+  tar -xf kibana.tar.gz \
+  && ls -lah \
+  && mv kibana-$VERSION-linux-x86_64 /usr/share/kibana \
+  && adduser -DH -s /sbin/nologin kibana \
+  # usr alpine nodejs and not bundled version
+  && bundled='NODE="${DIR}/node/bin/node"' \
+  && alpine_node='NODE="/usr/local/bin/node"' \
+  && sed -i "s|$bundled|$alpine_node|g" /usr/share/kibana/bin/kibana-plugin \
+  && sed -i "s|$bundled|$alpine_node|g" /usr/share/kibana/bin/kibana \
+  && rm -rf /usr/share/kibana/node \
+  && chown -R kibana:kibana /usr/share/kibana \
+  && rm -rf /tmp/* \
+  && apk del --purge .build-deps
+
+COPY config/kibana/kibana.yml /usr/share/kibana/config/kibana.yml
+COPY docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
 
 WORKDIR /usr/share/kibana
 
-## Update latest packges and install needed
-RUN apk update && \
-    apk add tar curl ca-certificates bash tzdata
+EXPOSE 5601
 
-## Create APP and group
-RUN addgroup --gid "$GID" --system "$APP" && \
-    adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/usr/share/kibana" \
-    --ingroup "$APP" \
-    --no-create-home \
-    --uid "$UID" \
-    "$APP"
-
-## Downloading and Installing Kibana (TAR)
-RUN cd /opt && \
-    curl --retry 8 -s -L -O https://artifacts.elastic.co/downloads/$APP/$APP-$VERSION.tar.gz && \
-    cd -
-RUN tar zxf /opt/$APP-$VERSION.tar.gz --strip-components=1
-
-## Configuring Kibana
-ADD config config
-RUN chmod 0775 /usr/share/kibana && \
-    chgrp 0 /usr/share/kibana && \
-    chown kibana /usr/share/kibana -R
-
-COPY --chown=1000:0 bin/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chgrp 0 /usr/local/bin/docker-entrypoint.sh && \
-    chmod g=u /etc/passwd && \
-    chmod 0775 /usr/local/bin/docker-entrypoint.sh
-
-EXPOSE 5601/tcp
-
-LABEL maintainer="shpaq@shpaq.org" \
-  org.opencontainers.image.created="2021-07-04" \
-  org.opencontainers.image.documentation="https://www.elastic.co/guide/en/kibana/reference/index.html" \
-  org.opencontainers.image.licenses="Apache-2.0-License" \
-  org.opencontainers.image.source="https://github.com/elastic/kibana" \
-  org.opencontainers.image.title="Kibana" \
-  org.opencontainers.image.url="https://www.elastic.co/products/kibana" \
-  org.opencontainers.image.vendor="Elastic" \
-  org.opencontainers.image.version="7.13.2"
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["kibana"]

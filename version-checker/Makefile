@@ -1,8 +1,8 @@
 BINDIR ?= $(CURDIR)/bin
 ARCH   ?= arm64
-VERSION?= 0.2.2
+VERSION?= 0.2.1
 HUB=szpaczyn
-HUB_IMAGE=xbrowsersync
+HUB_IMAGE=version-checker-arm64
 
 default: all
 

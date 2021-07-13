@@ -1,4 +1,4 @@
-VERSION?=v10.5.8
+VERSION?=v10.5.11
 REGISTRY="registry.shpaq.org"
 IMAGE=mariadb
 HUB=szpaczyn

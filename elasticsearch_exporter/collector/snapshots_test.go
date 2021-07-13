@@ -1,13 +1,24 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package collector
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
-	"time"
 
 	"github.com/go-kit/kit/log"
 )
@@ -46,8 +57,8 @@ func TestSnapshots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to parse URL: %s", err)
 		}
-		s := NewSnapshots(context.Background(), log.NewNopLogger(), http.DefaultClient, u, time.Nanosecond)
-		stats, err := s.updater.fetchAndDecodeSnapshotsStats()
+		s := NewSnapshots(log.NewNopLogger(), http.DefaultClient, u)
+		stats, err := s.fetchAndDecodeSnapshotsStats()
 		if err != nil {
 			t.Fatalf("Failed to fetch or decode snapshots stats: %s", err)
 		}

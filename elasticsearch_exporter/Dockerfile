@@ -1,14 +1,13 @@
-FROM quay.io/prometheus/golang-builder as builder
+ARG ARCH="arm64"
+ARG OS="linux"
+FROM quay.io/prometheus/busybox-${OS}-${ARCH}:glibc
+LABEL maintainer="The Prometheus Authors <prometheus-developers@googlegroups.com>"
 
-ADD .   /go/src/github.com/justwatchcom/elasticsearch_exporter
-WORKDIR /go/src/github.com/justwatchcom/elasticsearch_exporter
+ARG ARCH="arm64"
+ARG OS="linux"
 
-RUN make
-
-FROM        quay.io/prometheus/busybox:latest
-MAINTAINER  The Prometheus Authors <prometheus-developers@googlegroups.com>
-
-COPY --from=builder /go/src/github.com/justwatchcom/elasticsearch_exporter/elasticsearch_exporter  /bin/elasticsearch_exporter
+COPY elasticsearch_exporter /bin/elasticsearch_exporter
 
 EXPOSE      9114
+USER        nobody
 ENTRYPOINT  [ "/bin/elasticsearch_exporter" ]

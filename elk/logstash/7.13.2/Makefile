@@ -1,8 +1,9 @@
-VERSION?=v5.18.0
+#VERSION?=v7.5.1
+VERSION?=v7.12.0
 REGISTRY="registry.shpaq.org"
-IMAGE=calibre
+IMAGE=logstash
 HUB=szpaczyn
-HUB_IMAGE=calibre-arm64
+HUB_IMAGE=logstash-arm64
 
 default: build-push
 

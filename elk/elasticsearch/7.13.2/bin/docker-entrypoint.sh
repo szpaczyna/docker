@@ -97,4 +97,5 @@ fi
 
 # Signal forwarding and child reaping is handled by `tini`, which is the
 # actual entrypoint of the container
-run_as_other_user_if_needed /usr/share/elasticsearch/bin/elasticsearch <<<"$KEYSTORE_PASSWORD"
+chroot --userspec=1000:0 / /usr/share/elasticsearch/bin/elasticsearch <<<"$KEYSTORE_PASSWORD"
+#run_as_other_user_if_needed /usr/share/elasticsearch/bin/elasticsearch <<<"$KEYSTORE_PASSWORD"

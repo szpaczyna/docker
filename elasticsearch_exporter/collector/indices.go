@@ -1,7 +1,19 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package collector
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,11 +21,10 @@ import (
 	"net/url"
 	"path"
 	"strconv"
-	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/justwatchcom/elasticsearch_exporter/pkg/clusterinfo"
+	"github.com/prometheus-community/elasticsearch_exporter/pkg/clusterinfo"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -39,13 +50,14 @@ type shardMetric struct {
 // Indices information struct
 type Indices struct {
 	logger          log.Logger
-	updater         *indicesUpdater
+	client          *http.Client
+	url             *url.URL
+	shards          bool
 	clusterInfoCh   chan *clusterinfo.Response
 	lastClusterInfo *clusterinfo.Response
 
 	up                prometheus.Gauge
 	totalScrapes      prometheus.Counter
-	totalScrapeTime   prometheus.Counter
 	jsonParseFailures prometheus.Counter
 
 	indexMetrics []*indexMetric
@@ -53,7 +65,7 @@ type Indices struct {
 }
 
 // NewIndices defines Indices Prometheus metrics
-func NewIndices(ctx context.Context, logger log.Logger, client *http.Client, url *url.URL, shards bool, interval time.Duration) *Indices {
+func NewIndices(logger log.Logger, client *http.Client, url *url.URL, shards bool) *Indices {
 
 	indexLabels := labels{
 		keys: func(...string) []string {
@@ -84,15 +96,10 @@ func NewIndices(ctx context.Context, logger log.Logger, client *http.Client, url
 	}
 
 	indices := &Indices{
-		logger: logger,
-		updater: &indicesUpdater{
-			logger:   logger,
-			client:   client,
-			url:      url,
-			shards:   shards,
-			interval: interval,
-			sync:     make(chan struct{}, 1),
-		},
+		logger:        logger,
+		client:        client,
+		url:           url,
+		shards:        shards,
 		clusterInfoCh: make(chan *clusterinfo.Response),
 		lastClusterInfo: &clusterinfo.Response{
 			ClusterName: "unknown_cluster",
@@ -105,10 +112,6 @@ func NewIndices(ctx context.Context, logger log.Logger, client *http.Client, url
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: prometheus.BuildFQName(namespace, "index_stats", "total_scrapes"),
 			Help: "Current total ElasticSearch index scrapes.",
-		}),
-		totalScrapeTime: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: prometheus.BuildFQName(namespace, "index_stats", "total_scrape_time_seconds"),
-			Help: "Current total time spent in ElasticSearch index scrapes.",
 		}),
 		jsonParseFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: prometheus.BuildFQName(namespace, "index_stats", "json_parse_failures"),
@@ -1001,15 +1004,13 @@ func NewIndices(ctx context.Context, logger log.Logger, client *http.Client, url
 	go func() {
 		_ = level.Debug(logger).Log("msg", "starting cluster info receive loop")
 		for ci := range indices.clusterInfoCh {
-			_ = level.Debug(logger).Log("msg", "received cluster info update", "cluster", ci.ClusterName)
 			if ci != nil {
+				_ = level.Debug(logger).Log("msg", "received cluster info update", "cluster", ci.ClusterName)
 				indices.lastClusterInfo = ci
 			}
 		}
 		_ = level.Debug(logger).Log("msg", "exiting cluster info receive loop")
 	}()
-
-	indices.updater.Run(ctx)
 	return indices
 }
 
@@ -1030,39 +1031,75 @@ func (i *Indices) Describe(ch chan<- *prometheus.Desc) {
 		ch <- metric.Desc
 	}
 	ch <- i.up.Desc()
-	ch <- i.totalScrapeTime.Desc()
 	ch <- i.totalScrapes.Desc()
 	ch <- i.jsonParseFailures.Desc()
 }
 
+func (i *Indices) fetchAndDecodeIndexStats() (indexStatsResponse, error) {
+	var isr indexStatsResponse
+
+	u := *i.url
+	u.Path = path.Join(u.Path, "/_all/_stats")
+	if i.shards {
+		u.RawQuery = "level=shards"
+	}
+
+	res, err := i.client.Get(u.String())
+	if err != nil {
+		return isr, fmt.Errorf("failed to get index stats from %s://%s:%s%s: %s",
+			u.Scheme, u.Hostname(), u.Port(), u.Path, err)
+	}
+
+	defer func() {
+		err = res.Body.Close()
+		if err != nil {
+			_ = level.Warn(i.logger).Log(
+				"msg", "failed to close http.Client",
+				"err", err,
+			)
+		}
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		return isr, fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
+	}
+
+	bts, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		i.jsonParseFailures.Inc()
+		return isr, err
+	}
+
+	if err := json.Unmarshal(bts, &isr); err != nil {
+		i.jsonParseFailures.Inc()
+		return isr, err
+	}
+
+	return isr, nil
+}
+
 // Collect gets Indices metric values
 func (i *Indices) Collect(ch chan<- prometheus.Metric) {
-	var now = time.Now()
 	i.totalScrapes.Inc()
 	defer func() {
-		_ = level.Debug(i.logger).Log("msg", "scrape took", "seconds", time.Since(now).Seconds())
-		i.totalScrapeTime.Add(time.Since(now).Seconds())
 		ch <- i.up
 		ch <- i.totalScrapes
-		ch <- i.totalScrapeTime
 		ch <- i.jsonParseFailures
 	}()
 
 	// indices
-	if i.updater.lastError != nil {
+	indexStatsResp, err := i.fetchAndDecodeIndexStats()
+	if err != nil {
 		i.up.Set(0)
-		if _, ok := i.updater.lastError.(*json.MarshalerError); ok {
-			i.jsonParseFailures.Inc()
-		}
 		_ = level.Warn(i.logger).Log(
 			"msg", "failed to fetch and decode index stats",
-			"err", i.updater.lastError,
+			"err", err,
 		)
+		return
 	}
 	i.up.Set(1)
 
 	// Index stats
-	var indexStatsResp = i.updater.lastResponse
 	for indexName, indexStats := range indexStatsResp.Indices {
 		for _, metric := range i.indexMetrics {
 			ch <- prometheus.MustNewConstMetric(
@@ -1073,7 +1110,7 @@ func (i *Indices) Collect(ch chan<- prometheus.Metric) {
 			)
 
 		}
-		if i.updater.shards {
+		if i.shards {
 			for _, metric := range i.shardMetrics {
 				// gaugeVec := prometheus.NewGaugeVec(metric.Opts, metric.Labels)
 				for shardNumber, shards := range indexStats.Shards {
@@ -1089,97 +1126,4 @@ func (i *Indices) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 	}
-}
-
-type indicesUpdater struct {
-	logger       log.Logger
-	client       *http.Client
-	url          *url.URL
-	shards       bool
-	sync         chan struct{}
-	interval     time.Duration
-	lastResponse indexStatsResponse
-	lastError    error
-}
-
-func (upt *indicesUpdater) Run(ctx context.Context) {
-	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				_ = level.Info(upt.logger).Log(
-					"msg", "context cancelled, exiting indices update loop",
-					"err", ctx.Err(),
-				)
-				return
-			case <-upt.sync:
-				upt.lastResponse, upt.lastError = upt.fetchAndDecodeIndexStats()
-				continue
-			}
-		}
-	}(ctx)
-
-	_ = level.Info(upt.logger).Log("msg", "triggering initial indices call")
-	upt.sync <- struct{}{}
-
-	go func(ctx context.Context) {
-		ticker := time.NewTicker(upt.interval)
-		for {
-			select {
-			case <-ctx.Done():
-				_ = level.Info(upt.logger).Log(
-					"msg", "context cancelled, exiting indices trigger loop",
-					"err", ctx.Err(),
-				)
-				return
-			case <-ticker.C:
-				_ = level.Debug(upt.logger).Log(
-					"msg", "triggering periodic indices update",
-				)
-				upt.sync <- struct{}{}
-			}
-		}
-	}(ctx)
-}
-
-func (upt *indicesUpdater) fetchAndDecodeIndexStats() (indexStatsResponse, error) {
-	_ = level.Debug(upt.logger).Log("msg", "getting fresh indices metrics")
-	var isr indexStatsResponse
-
-	u := *upt.url
-	u.Path = path.Join(u.Path, "/_all/_stats")
-	if upt.shards {
-		u.RawQuery = "level=shards"
-	}
-
-	res, err := upt.client.Get(u.String())
-	if err != nil {
-		return isr, fmt.Errorf("failed to get index stats from %s://%s:%s%s: %s",
-			u.Scheme, u.Hostname(), u.Port(), u.Path, err)
-	}
-
-	defer func() {
-		err = res.Body.Close()
-		if err != nil {
-			_ = level.Warn(upt.logger).Log(
-				"msg", "failed to close http.Client",
-				"err", err,
-			)
-		}
-	}()
-
-	if res.StatusCode != http.StatusOK {
-		return isr, fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
-	}
-
-	bts, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return isr, err
-	}
-
-	if err := json.Unmarshal(bts, &isr); err != nil {
-		return isr, err
-	}
-
-	return isr, nil
 }
