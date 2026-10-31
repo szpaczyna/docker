@@ -1,3 +1,8 @@
+### graphify knowledge graph output
+# Written by /graphify. No leading slash: the graph can be built from any
+# subdirectory, so the output dir can land at any level of the tree.
+graphify-out/
+
 ### macOS
 # General
 .DS_Store
