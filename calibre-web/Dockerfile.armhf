@@ -87,9 +87,9 @@ RUN \
     /root/.cache \
     /root/.cargo
 
-# add local files
+# add local files
 COPY root/ /
 
-# ports and volumes
+# ports and volumes
 EXPOSE 8083
 VOLUME /config

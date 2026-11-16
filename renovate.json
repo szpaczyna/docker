@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "registry.shpaq.org is an internal registry not reachable from Mend-hosted Renovate (internalHostAccess=block). Renovate cannot look up this image, so disable it.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["registry.shpaq.org/version-checker"],
+      "enabled": false
+    }
+  ]
+}

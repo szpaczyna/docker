@@ -94,7 +94,7 @@ RUN apt -y autoremove && \
     /var/tmp/* \
     /root/.cache
 
-## add local files
+## add local files
 COPY defaults/client_secrets.json /config
 COPY defaults/app.db /books
 
@@ -104,7 +104,7 @@ RUN chown calibre:calibre /config /books /app/calibre-web -R
 ## run as dedicated user
 #USER calibre
 
-## ports and volumes
+## ports and volumes
 EXPOSE 8083/tcp
 
 VOLUME /config
